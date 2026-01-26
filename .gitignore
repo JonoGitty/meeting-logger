@@ -1,0 +1,28 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Local outputs
+meeting_logger/audio/
+meeting_logger/transcripts/
+meeting_logger/outputs/
+meeting_logger/*.log
+
+# Audio files
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+*.opus
+
+# OS
+.DS_Store
+Thumbs.db
