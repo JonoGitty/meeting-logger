@@ -19,6 +19,11 @@ from summariser.meeting_summariser import summarise_meeting, timeline_summary
 from notion.notion_uploader import upload_to_notion
 from utils.date_utils import determine_date, format_date
 from utils.chunking import group_segments_into_windows
+from research.researcher import (
+    extract_research_requests,
+    normalize_trigger_text,
+    run_research,
+)
 
 
 @dataclass
@@ -37,6 +42,11 @@ class PipelineConfig:
     openai_api_key: Optional[str] = None
     notion_token: Optional[str] = None
     notion_database_id: Optional[str] = None
+    enable_research: bool = False
+    research_provider: Optional[str] = None
+    research_api_key: Optional[str] = None
+    research_triggers: Optional[List[str]] = None
+    research_verbs: Optional[List[str]] = None
 
 
 def infer_meeting_type(title: str) -> Optional[str]:
@@ -119,6 +129,36 @@ def build_markdown(notes: Dict[str, Any], transcript: str, timeline: List[Dict[s
         lines.append("- None")
         lines.append("")
 
+    lines.append("## Research requests")
+    research_requests = notes.get("research_requests", [])
+    if research_requests:
+        for item in research_requests:
+            ts = item.get("ts", "")
+            speaker = item.get("speaker", "")
+            query = item.get("query", "")
+            lines.append(f"- [{ts}] {speaker}: {query}".strip())
+    else:
+        lines.append("- None")
+    lines.append("")
+
+    lines.append("## Research results")
+    research_results = notes.get("research_results", [])
+    if research_results:
+        for item in research_results:
+            query = item.get("query", "")
+            lines.append(f"**{query}**")
+            for res in item.get("results", []) or []:
+                title = res.get("title") or "Result"
+                url = res.get("url") or ""
+                snippet = res.get("snippet") or ""
+                lines.append(f"- {title} {url}".strip())
+                if snippet:
+                    lines.append(f"  {snippet}")
+            lines.append("")
+    else:
+        lines.append("- None")
+        lines.append("")
+
     lines.append("## Transcript")
     lines.append("")
     lines.append(transcript)
@@ -130,7 +170,8 @@ def build_markdown(notes: Dict[str, Any], transcript: str, timeline: List[Dict[s
 def run_pipeline(
     config: PipelineConfig,
     logger: Optional[Callable[[str], None]] = None,
-    progress_cb: Optional[Callable[[int, int, str], None]] = None,
+    progress_cb: Optional[Callable[[int, int, str, Optional[float]], None]] = None,
+    cancel_cb: Optional[Callable[[], bool]] = None,
 ) -> Dict[str, Any]:
     def log(message: str) -> None:
         if logger:
@@ -142,6 +183,8 @@ def run_pipeline(
         os.environ["OPENAI_API_KEY"] = config.openai_api_key
     if config.openai_model:
         os.environ["OPENAI_MODEL"] = config.openai_model
+    if os.getenv("OPENAI_MODEL_FALLBACK") is None:
+        os.environ["OPENAI_MODEL_FALLBACK"] = "gpt-5"
     if config.notion_token:
         os.environ["NOTION_TOKEN"] = config.notion_token
     if config.notion_database_id:
@@ -182,10 +225,11 @@ def run_pipeline(
         device,
         compute_type,
         progress_cb=progress_cb,
+        cancel_cb=cancel_cb,
     )
 
     if not results:
-        raise RuntimeError("No audio files found to transcribe.")
+        raise RuntimeError("No audio files found to transcribe or transcription cancelled.")
 
     attendees = sorted({r.speaker for r in results})
 
@@ -197,6 +241,7 @@ def run_pipeline(
     merged_text = merged_transcript_text(segments)
     write_text(transcripts_dir / "merged_transcript.txt", merged_text)
     save_segments_json(transcripts_dir / "segments.json", segments)
+    normalized_transcript = normalize_trigger_text(merged_text)
 
     meeting_title = config.meeting_title if config.meeting_title not in ("", None) else None
     meeting_type = infer_meeting_type(meeting_title or "")
@@ -213,9 +258,12 @@ def run_pipeline(
         "timeline": [],
         "key_discussion": [],
         "open_questions": [],
+        "research_requests": [],
+        "research_results": [],
     }
 
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    model = os.getenv("OPENAI_MODEL", "gpt-5-pro")
+    fallback_model = os.getenv("OPENAI_MODEL_FALLBACK", "gpt-5")
     timeline: List[Dict[str, Any]] = []
 
     if config.summarise:
@@ -223,16 +271,17 @@ def run_pipeline(
             log("STATUS: Summarising")
             notes.update(
                 summarise_meeting(
-                    transcript=merged_text,
+                    transcript=normalized_transcript,
                     attendees=attendees,
                     date_str=date_str,
                     meeting_title=meeting_title,
                     model=model,
+                    fallback_model=fallback_model,
                 )
             )
 
             windows = group_segments_into_windows(segments, config.chunk_minutes)
-            timeline = timeline_summary(windows, model=model)
+            timeline = timeline_summary(windows, model=model, fallback_model=fallback_model)
             notes["timeline"] = timeline
 
             if not meeting_title:
@@ -247,6 +296,25 @@ def run_pipeline(
     if not meeting_title:
         meeting_title = notes.get("title") or "Team Sync"
     notes["title"] = meeting_title
+
+    research_requests = extract_research_requests(
+        normalized_transcript,
+        triggers=config.research_triggers,
+        verbs=config.research_verbs,
+    )
+    research_results = []
+    if config.enable_research:
+        log("STATUS: Researching")
+        research_results = run_research(
+            research_requests,
+            provider=config.research_provider or "none",
+            api_key=config.research_api_key,
+        )
+
+    notes["research_requests"] = [
+        {"ts": r.ts, "speaker": r.speaker, "query": r.query} for r in research_requests
+    ]
+    notes["research_results"] = research_results
 
     notes_path = outputs_dir / f"{date_str}_meeting_notes.json"
     with notes_path.open("w", encoding="utf-8") as f:
@@ -283,6 +351,8 @@ def run_pipeline(
                     actions=notes.get("actions", []),
                     highlights=notes.get("highlights", []),
                     timeline=timeline,
+                    research_requests=notes.get("research_requests", []),
+                    research_results=notes.get("research_results", []),
                     transcript=merged_text,
                 )
                 if notion_url:

@@ -28,7 +28,7 @@ Plaud-style meeting notes from Craig recordings. Transcribe locally with faster-
 4) Install dependencies:
    - `pip install --upgrade pip`
    - `pip install -r requirements.txt`
-5) Copy `.env.example` to `.env` and set keys.
+5) Copy `.env.example` to `.env` and set keys. Default model is `gpt-5-pro` with fallback `gpt-5`. Change `OPENAI_MODEL`/`OPENAI_MODEL_FALLBACK` if you want a cheaper option.
 
 ### Windows quick install + GUI
 Run these from the `meeting_logger` folder:
@@ -78,6 +78,8 @@ python cli.py --audio_dir "./audio/2026-01-24/raw_audio" --project "AI-Orch" --c
 GUI:
 - Run `launch.bat` on Windows.
 - All CLI options are exposed in the Settings tab.
+- GUI shows live status, progress, ETA, and a Cancel button (finishes current file).
+- Optional research requests (e.g. "Craig/Quag research ...") with provider settings in the GUI.
 
 Options:
 - `--meeting` provide a fixed title (otherwise auto-generated).
@@ -86,6 +88,11 @@ Options:
 - `--recording_url` attach a link in Notion.
 - `--no_summarise` skip OpenAI summarisation.
 - `--no_notion` skip Notion upload.
+- `--enable_research` enable research requests.
+- `--research_provider` set provider (none/tavily).
+- `--research_api_key` set provider API key.
+- `--research_triggers` comma-separated trigger words.
+- `--research_verbs` comma-separated verbs.
 
 Outputs:
 - `transcripts/<date>/Speaker.txt`

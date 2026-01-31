@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 
 def _get_openai_client():
@@ -17,22 +17,29 @@ def _get_openai_client():
     return OpenAI(api_key=api_key)
 
 
-def _call_openai_json(model: str, system: str, user: str) -> Dict[str, Any]:
+def _call_openai_json(models: Sequence[str], system: str, user: str) -> Dict[str, Any]:
     client = _get_openai_client()
 
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.2,
-    )
-    content = response.choices[0].message.content
-    if not content:
-        raise RuntimeError("Empty response from OpenAI")
-    return json.loads(content)
+    last_exc: Exception | None = None
+    for model in models:
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.2,
+            )
+            content = response.choices[0].message.content
+            if not content:
+                raise RuntimeError("Empty response from OpenAI")
+            return json.loads(content)
+        except Exception as exc:
+            last_exc = exc
+
+    raise last_exc or RuntimeError("OpenAI call failed")
 
 
 def _safe_list(value: Any) -> List[Any]:
@@ -47,6 +54,7 @@ def summarise_meeting(
     date_str: str,
     meeting_title: Optional[str],
     model: str,
+    fallback_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     title_hint = meeting_title or ""
 
@@ -84,7 +92,10 @@ def summarise_meeting(
         f"{transcript}"
     )
 
-    data = _call_openai_json(model=model, system=system, user=user)
+    models = [model]
+    if fallback_model and fallback_model not in models:
+        models.append(fallback_model)
+    data = _call_openai_json(models=models, system=system, user=user)
 
     return {
         "title": data.get("title") or (meeting_title or "Team Sync"),
@@ -101,6 +112,7 @@ def summarise_meeting(
 def timeline_summary(
     windows: List[Dict[str, Any]],
     model: str,
+    fallback_model: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     if not windows:
         return []
@@ -137,5 +149,8 @@ def timeline_summary(
         f"Windows:\n{json.dumps(window_payload, ensure_ascii=False)}"
     )
 
-    data = _call_openai_json(model=model, system=system, user=user)
+    models = [model]
+    if fallback_model and fallback_model not in models:
+        models.append(fallback_model)
+    data = _call_openai_json(models=models, system=system, user=user)
     return _safe_list(data.get("timeline"))

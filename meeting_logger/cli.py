@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from rich.console import Console
@@ -24,8 +25,16 @@ def main() -> None:
     parser.add_argument("--upload_notion", action="store_true", help="Upload results to Notion")
     parser.add_argument("--no_summarise", action="store_true", help="Skip OpenAI summarisation")
     parser.add_argument("--no_notion", action="store_true", help="Skip Notion upload")
+    parser.add_argument("--enable_research", action="store_true", help="Enable research requests")
+    parser.add_argument("--research_provider", default=None, help="Research provider (none/tavily)")
+    parser.add_argument("--research_api_key", default=None, help="Research provider API key")
+    parser.add_argument("--research_triggers", default=None, help="Comma-separated trigger words")
+    parser.add_argument("--research_verbs", default=None, help="Comma-separated verbs")
 
     args = parser.parse_args()
+
+    triggers = [t.strip() for t in args.research_triggers.split(",") if t.strip()] if args.research_triggers else None
+    verbs = [v.strip() for v in args.research_verbs.split(",") if v.strip()] if args.research_verbs else None
 
     config = PipelineConfig(
         audio_dir=Path(args.audio_dir),
@@ -38,6 +47,11 @@ def main() -> None:
         upload_notion=args.upload_notion,
         summarise=not args.no_summarise,
         notion_enabled=not args.no_notion,
+        enable_research=args.enable_research,
+        research_provider=args.research_provider or os.getenv("RESEARCH_PROVIDER"),
+        research_api_key=args.research_api_key or os.getenv("TAVILY_API_KEY"),
+        research_triggers=triggers,
+        research_verbs=verbs,
     )
 
     try:

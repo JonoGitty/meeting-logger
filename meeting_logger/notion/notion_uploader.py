@@ -92,6 +92,8 @@ def upload_to_notion(
     actions: List[Dict[str, Any]],
     highlights: List[Dict[str, Any]],
     timeline: List[Dict[str, Any]],
+    research_requests: List[Dict[str, Any]],
+    research_results: List[Dict[str, Any]],
     transcript: str,
 ) -> str:
     notion = Client(auth=token)
@@ -174,6 +176,32 @@ def upload_to_notion(
                 blocks.append(_bulleted(bullet))
     else:
         blocks.append(_bulleted("No timeline summary generated."))
+
+    blocks.append(_heading("Research requests"))
+    if research_requests:
+        for item in research_requests:
+            ts = item.get("ts", "")
+            speaker = item.get("speaker", "")
+            query = item.get("query", "")
+            blocks.append(_bulleted(f"[{ts}] {speaker}: {query}".strip()))
+    else:
+        blocks.append(_bulleted("No research requests recorded."))
+
+    blocks.append(_heading("Research results"))
+    if research_results:
+        for item in research_results:
+            query = item.get("query", "")
+            blocks.append(_paragraph(query))
+            for res in item.get("results", []) or []:
+                title = res.get("title") or "Result"
+                url = res.get("url") or ""
+                snippet = res.get("snippet") or ""
+                line = f"{title} {url}".strip()
+                blocks.append(_bulleted(line))
+                if snippet:
+                    blocks.append(_paragraph(snippet))
+    else:
+        blocks.append(_bulleted("No research results available."))
 
     blocks.append(_heading("Transcript"))
     transcript_children = []

@@ -46,6 +46,25 @@ def normalize_audio(input_path: Path, work_dir: Path) -> Path:
     return output_path
 
 
+def get_duration_seconds(audio_path: Path) -> Optional[float]:
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(audio_path),
+    ]
+    try:
+        result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        value = result.stdout.strip()
+        return float(value) if value else None
+    except Exception:
+        return None
+
+
 def load_model(model_name: str, device: str, compute_type: str) -> WhisperModel:
     return WhisperModel(model_name, device=device, compute_type=compute_type)
 
@@ -90,7 +109,8 @@ def transcribe_directory(
     device: str,
     compute_type: str,
     language: Optional[str] = None,
-    progress_cb: Optional[Callable[[int, int, str], None]] = None,
+    progress_cb: Optional[Callable[[int, int, str, Optional[float]], None]] = None,
+    cancel_cb: Optional[Callable[[], bool]] = None,
 ) -> List[TranscriptionResult]:
     audio_files = list_audio_files(audio_dir)
     results: List[TranscriptionResult] = []
@@ -104,12 +124,15 @@ def transcribe_directory(
         tmp_dir = Path(tmp)
         total = len(audio_files)
         for idx, audio_path in enumerate(audio_files, start=1):
+            if cancel_cb and cancel_cb():
+                break
             speaker = audio_path.stem
             normalized = normalize_audio(audio_path, tmp_dir)
+            duration = get_duration_seconds(normalized)
             result = transcribe_file(model, normalized, speaker, language=language)
             results.append(result)
             if progress_cb:
-                progress_cb(idx, total, speaker)
+                progress_cb(idx, total, speaker, duration)
 
     return results
 

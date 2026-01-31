@@ -5,3 +5,4 @@ notion-client
 python-dotenv
 rich
 tqdm
+requests
